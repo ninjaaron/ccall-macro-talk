@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Introducing the Ccall Macro</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Introducing the `@ccall` Macro
+
+---
+class: middle
+
+# Feature Overview
+
+- More intuitive, "Julian" syntax
+- Allows the use of varags of differing types
+- Checks that function pointers are instances of `Ptr{Cvoid}`
+- Anti-feature: No support for choosing the LLVM calling conventions
+
+---
+class: middle
+
+# Julian Syntax
+calling this c function:
+
+```C
+size_t strlen(char *)
+```
+
+goes from this:
+
+```julia
+ccall(:strlen, Csize_t, (Cstring,), "foobar")
+```
+
+to this:
+
+```julia
+@ccall strlen("foobar"::Cstring)::Csize_t
+```
+
+- Function name is used with call syntax (`library.function_name()`
+  where the function name can't be resolved in the current process)
+- Arguments types are attached to their arguments.
+- Return types go after the call syntax (as with Julia function
+  declarations)
+
+---
+
+class: middle
+
+# Varargs
+
+Varargs of different types now work (previously, all varargs had to be
+of a single type. 
+
+```julia
+julia> foo = 10
+10
+
+julia> @ccall printf("%s = %d\n"::Cstring ; "foo"::Cstring, foo::Cint)::Cint
+foo = 10
+9
+```
+
+Jameson Nash did all the work with the LLVM interface and parser to
+make this possible. I just implemented the syntax transformation.
+
+---
+class: middle
+
+# Sanity checks on function pointers:
+
+```julia
+julia> not_function = pointer("foo")
+Ptr{UInt8} @0x00007fd9a019adf8
+
+julia> @ccall $not_function()::Cvoid
+ERROR: ArgumentError: interpolated function `not_function` was not a Ptr{Cvoid}, but Ptr{UInt8}
+```
+
+This is implemented as a runtime check, but it should compile out with
+dead branch elimination in many cases.
+
+---
+
+class: middle
+
+# No Support for LLVM Calling Conventions
+
+There is a little-used, optional second argument to `ccall`---the LLVM
+calling convention:
+
+```julia
+julia> ccall(:strlen, stdcall, Csize_t, (Cstring,), "foobar") |> println
+6
+```
+The `@ccall` macro has no support for this. Originally there was, and
+there are still hooks for it in the code, but reviewers thought it was
+cleaner to leave it out for now.
+
+If you need it, you could do your own like this:
+
+```julia
+macro ccall2(call, convention=:ccall)
+    return Base.ccall_macro_lower(convention, Base.ccall_macro_parse(expr)...)
+end
+```
+---
+
+class: middle, center
+
+# Origin Story
+
+---
+
+class: middle
+
+I just wanted Julia syntax for `ccall`, but I wasn't sure where it
+would be better to put the return type, so I posted on the forum.
+
+https://discourse.julialang.org/t/wrote-a-macro-to-make-ccall-look-a-little-more-like-julia-need-an-opinion-on-the-return-type-placement/19373/13
+
+---
+
+class: middle
+
+- Stefan mentioned he had proposed something like this earlier for
+  `Base`.
+- Chris Foster said he _still_ interested in having something like
+  this in `Base`. They suggested I make it a package to get it
+  polished up before making a pull request.
+- Also worth noting that a fair amount of the thread has to do with
+  how `varargs` should be handled.
+
+Here's the repo, for posterity:
+https://github.com/ninjaaron/CcallMacros.jl
+
+It contains some other toys that are not very interesting.
+
+---
+
+class: middle
+
+- I worked on it a little and then did nothing for a year.
+- I went to JuliaCon 2019 and got inspired to actually get the PR done
+  in the hackathon.
+- Didn't quite finish it, but I got a lot of advice from the core
+  developers.
+- Once again, the handling of varargs was discussed. Jameson said I
+  should base it on the underlying `foreigncall` rather than `ccall`,
+  and I would just have to patch the parser and the llvm interface a
+  bit to get it working.
+- Little did he know, I don't know C++ or Scheme.
+
+---
+class: middle
+
+So I made the pull request the week after the conference ended. (only
+with support for varargs of the same type, like `ccall`).
+
+https://github.com/JuliaLang/julia/pull/32748
+
+- There was much discussion and some really helpful and thorough code
+  review (especially from Chris Foster, who kind of shepherded the
+  whole thing).
+- More tests were written.
+- Return of the varargs discussion. I told Jameson that I wasn't
+  really the person to be digging around in the parser. He graciously
+  implemented all the backend changes necessary to support varargs of
+  different types. (Which amounts to a good deal more code than what I
+  wrote for the whole PR)
+- I rebased the whole thing on `foreigncall` rather than `ccall` to
+  exploit this functionality.
+- after poking around for two and a half months, the PR was finished.
+
+---
+
+class: middle, center
+
+Then nothing happened for four months. I think the core devs were
+working on getting a release ready or something and the PR fell by the
+wayside...
+
+---
+
+class: middle
+
+- @Gnimuc piped up in February of this year and suggested something be
+  done.
+- Core devs triaged it and it was pulled into master within a week.
+- It's now available in Julia 1.5
+
+---
+
+class: center, middle
+
+# _fin_
+
+
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
